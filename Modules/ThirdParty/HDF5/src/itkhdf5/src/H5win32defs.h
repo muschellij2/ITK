@@ -60,15 +60,6 @@ typedef __int64             h5_stat_size_t;
 
 #ifdef H5_HAVE_VISUAL_STUDIO
 
-/* _O_BINARY must be set in Windows to avoid CR-LF <-> LF EOL
- * transformations when performing I/O. Note that this will
- * produce Unix-style text files, though.
- *
- * Also note that the variadic macro is using a VC++ extension
- * where the comma is dropped if nothing is passed to the ellipsis.
- */
-#define HDopen(S,F,...)       _open(S, F | _O_BINARY, __VA_ARGS__)
-
 #if (_MSC_VER < 1800)
   #ifndef H5_HAVE_STRTOLL
     #define HDstrtoll(S,R,N)    _strtoi64(S,R,N)
@@ -163,7 +154,6 @@ extern "C" {
 #define HDpthread_self_ulong() ((unsigned long)GetCurrentThreadId())
 
 #ifndef H5_HAVE_MINGW
-#define HDopen(S,F,M)       _open(S, F | _O_BINARY, M)
 #define HDftruncate(F,L)    _chsize_s(F,L)
 #define HDfseek(F,O,W)      _fseeki64(F,O,W)
 #endif /* H5_HAVE_MINGW */
