@@ -152,8 +152,8 @@ extern "C" {
 /* Don't use actual pthread_self on Windows because the return
  * type cannot be cast as a ulong like other systems. */
 #define HDpthread_self_ulong() ((unsigned long)GetCurrentThreadId())
-#define HDopen(S,F,M)       _open(S, F | _O_BINARY, M)	
 #ifndef H5_HAVE_MINGW
+#define HDopen(S,F,M)       _open(S, F | _O_BINARY, M)  
 #define HDftruncate(F,L)    _chsize_s(F,L)
 #define HDfseek(F,O,W)      _fseeki64(F,O,W)
 #endif /* H5_HAVE_MINGW */
