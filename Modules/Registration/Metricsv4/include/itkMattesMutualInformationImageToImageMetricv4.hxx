@@ -307,32 +307,6 @@ MattesMutualInformationImageToImageMetricv4<TFixedImage,
                                             TInternalComputationValueType,
                                             TMetricTraits>::ComputeResults() const
 {
-  if (this->m_JointPDFSum < itk::NumericTraits<PDFValueType>::epsilon())
-  {
-    itkExceptionMacro("Joint PDF summed to zero");
-  }
-
-  std::fill(this->m_MovingImageMarginalPDF.begin(), this->m_MovingImageMarginalPDF.end(), 0.0F);
-
-  // Collect some results
-  PDFValueType totalMassOfPDF = 0.0;
-  for (unsigned int i = 0; i < this->m_NumberOfHistogramBins; ++i)
-  {
-    totalMassOfPDF += this->m_ThreaderFixedImageMarginalPDF[0][i];
-  }
-
-  const PDFValueType  normalizationFactor = 1.0 / this->m_JointPDFSum;
-  JointPDFValueType * pdfPtr = this->m_ThreaderJointPDF[0]->GetBufferPointer();
-  for (unsigned int i = 0; i < this->m_NumberOfHistogramBins; ++i)
-  {
-    PDFValueType * movingMarginalPtr = &(m_MovingImageMarginalPDF[0]);
-    for (unsigned int j = 0; j < this->m_NumberOfHistogramBins; j++)
-    {
-      *(pdfPtr) *= normalizationFactor;
-      *(movingMarginalPtr++) += *(pdfPtr++);
-    }
-  }
-
   if (this->GetNumberOfValidPoints() == 0)
   {
     itkExceptionMacro("All samples map outside moving image buffer. "
@@ -341,78 +315,115 @@ MattesMutualInformationImageToImageMetricv4<TFixedImage,
                       "metric will work. For instance, you can align the image centers by translation."
                       << std::endl);
   }
-
-  // Normalize the fixed image marginal PDF
-  if (totalMassOfPDF == 0.0)
+  if (this->m_JointPDFSum < itk::NumericTraits<PDFValueType>::epsilon())
   {
-    itkExceptionMacro("Fixed image marginal PDF summed to zero");
+    itkExceptionMacro("Joint PDF summed to zero");
   }
-  for (unsigned int bin = 0; bin < this->m_NumberOfHistogramBins; ++bin)
+  const PDFValueType normalizationFactor = 1.0 / this->m_JointPDFSum;
+
+  // Create aliases to make variable name intent more clear
+  // At this point the multiple thread partial values have been merged into
+  // the zero'th element of the m_ThreaderJointPDF and m_ThreaderFixedImageMarginalPDF.
+  const auto &                l_JointPDF = this->m_ThreaderJointPDF[0];
+  std::vector<PDFValueType> & l_FixedImageMarginalPDF = this->m_ThreaderFixedImageMarginalPDF[0];
+
+  /* FixedMarginalPDF         JointPDF
+   *      (j)            -------------------
+   *   [ 3 ]             |  1  |  2  |  0  |
+   *                       ---   ---   ---
+   *   [ 5 ]             |  4  |  1  |  0  |
+   *                       ---   ---   ---
+   *   [ 0 ]             |  0  |  0  |  0  |
+   *                     -------------------
+   *
+   *                       [ 5 ] [ 3 ] [ 0 ]  (i)  <-- MovingMarginalPDF
+   */
+
+  auto nomalize_labmda = [&normalizationFactor](const JointPDFValueType & c) -> JointPDFValueType {
+    return c * normalizationFactor;
+  };
+  const size_t        number_of_JointPDF_bins = this->m_NumberOfHistogramBins * this->m_NumberOfHistogramBins;
+  JointPDFValueType * pdfPtr = l_JointPDF->GetBufferPointer();
+  std::transform(pdfPtr, pdfPtr + number_of_JointPDF_bins, pdfPtr, nomalize_labmda);
+  std::transform(
+    l_FixedImageMarginalPDF.cbegin(), l_FixedImageMarginalPDF.cend(), l_FixedImageMarginalPDF.begin(), nomalize_labmda);
   {
-    this->m_ThreaderFixedImageMarginalPDF[0][bin] /= totalMassOfPDF;
+    size_t curr_col = 0;
+    for (auto & currMarginalBin : this->m_MovingImageMarginalPDF)
+    {
+      currMarginalBin = 0;
+      const auto start = pdfPtr + curr_col++;
+      const auto stop = pdfPtr + number_of_JointPDF_bins;
+      for (auto colptr = start; colptr < stop; colptr += this->m_NumberOfHistogramBins)
+      {
+        currMarginalBin += *colptr;
+      }
+      currMarginalBin *= normalizationFactor;
+    }
   }
 
+  static constexpr PDFValueType closeToZero = std::numeric_limits<PDFValueType>::epsilon();
+  const PDFValueType            nFactor = 1.0 / (this->m_MovingImageBinSize * this->GetNumberOfValidPoints());
+
+  auto const temp_num_histogram_bins = this->m_NumberOfHistogramBins;
   /**
    * Compute the metric by double summation over histogram.
    */
-
-  // Setup pointer to point to the first bin
-  JointPDFValueType * jointPDFPtr = this->m_ThreaderJointPDF[0]->GetBufferPointer();
-
-  // Initialize sum to zero
   PDFValueType sum = 0.0;
-
-  const PDFValueType nFactor = 1.0 / (this->m_MovingImageBinSize * this->GetNumberOfValidPoints());
-
-  static constexpr PDFValueType closeToZero = std::numeric_limits<PDFValueType>::epsilon();
-  for (unsigned int fixedIndex = 0; fixedIndex < this->m_NumberOfHistogramBins; ++fixedIndex)
+  for (unsigned int fixedIndex = 0; fixedIndex < temp_num_histogram_bins; ++fixedIndex)
   {
-    const PDFValueType fixedImagePDFValue = this->m_ThreaderFixedImageMarginalPDF[0][fixedIndex];
-    for (unsigned int movingIndex = 0; movingIndex < this->m_NumberOfHistogramBins; ++movingIndex, jointPDFPtr++)
+    const PDFValueType fixedImageMarginalPDFValue = l_FixedImageMarginalPDF[fixedIndex];
+
+    // If fixedImageMarginalPDFValue is <= closeToZero, then the entire row of values is <= closeToZero, so
+    // by definition, each of the individual jointPDFVlaue's must also be close to zero in the line below!
+    if (fixedImageMarginalPDFValue > closeToZero)
     {
-      const PDFValueType movingImagePDFValue = this->m_MovingImageMarginalPDF[movingIndex];
-      const PDFValueType jointPDFValue = *(jointPDFPtr);
-
-      // check for non-zero bin contribution
-      if (!(jointPDFValue > closeToZero && movingImagePDFValue > closeToZero))
+      // NOTE: If fixedImageMarginalPDFValue <=> closeToZero, logfixedImageMarginalPDFValue is never used
+      //       The common case is that it is used, so perform std::log(fixedImageMarginalPDFValue) one time
+      const PDFValueType logfixedImageMarginalPDFValue = std::log(fixedImageMarginalPDFValue);
+      // Setup pointer to point to the first bin of this row in the jointPDF
+      const JointPDFValueType * jointPDFRowPtr = l_JointPDF->GetBufferPointer() + fixedIndex * temp_num_histogram_bins;
+      for (unsigned int movingIndex = 0; movingIndex < temp_num_histogram_bins; ++movingIndex)
       {
-        continue;
-      }
-      const PDFValueType pRatio = std::log(jointPDFValue / movingImagePDFValue);
+        const PDFValueType & movingImageMarginalPDF = this->m_MovingImageMarginalPDF[movingIndex];
+        const PDFValueType   jointPDFValue = *(jointPDFRowPtr++); /* Get Value and goto next bin in row */
 
-      if (fixedImagePDFValue > closeToZero)
-      {
-        sum += jointPDFValue * (pRatio - std::log(fixedImagePDFValue));
-      }
-
-      if (this->GetComputeDerivative())
-      {
-        if (!this->HasLocalSupport())
+        // check for non-zero bin contribution, if movingImageMarginalPDF <= closeToZero, then so is joinPDFValue
+        if (movingImageMarginalPDF > closeToZero &&
+            jointPDFValue > closeToZero) //<-- This check is always false if not isNotNearZerofixedImageMarginalPDFValue
         {
-          // Collect global derivative contributions
+          const PDFValueType pRatio = std::log(jointPDFValue / movingImageMarginalPDF);
+          sum += jointPDFValue * (pRatio - logfixedImageMarginalPDFValue);
 
-          // move joint pdf derivative pointer to the right position
-          JointPDFValueType const * derivPtr = this->m_JointPDFDerivatives->GetBufferPointer() +
-                                               (fixedIndex * this->m_JointPDFDerivatives->GetOffsetTable()[2]) +
-                                               (movingIndex * this->m_JointPDFDerivatives->GetOffsetTable()[1]);
-          for (unsigned int parameter = 0, lastParameter = this->GetNumberOfLocalParameters();
-               parameter < lastParameter;
-               ++parameter, derivPtr++)
+          if (this->GetComputeDerivative())
           {
-            // Ref: eqn 23 of Thevenaz & Unser paper [3]
-            (*(this->m_DerivativeResult))[parameter] += (*derivPtr) * pRatio;
-          } // end for-loop over parameters
-        }
-        else
-        {
-          // Collect the pRatio per pdf indices.
-          // Will be applied subsequently to local-support derivative
-          const OffsetValueType index = movingIndex + (fixedIndex * this->m_NumberOfHistogramBins);
-          this->m_PRatioArray[index] = pRatio * nFactor;
-        }
-      }
-    } // end for-loop over moving index
-  }   // end for-loop over fixed index
+            if (!this->HasLocalSupport())
+            {
+              // Collect global derivative contributions
+              JointPDFValueType const * derivPtr = this->m_JointPDFDerivatives->GetBufferPointer() +
+                                                   (fixedIndex * this->m_JointPDFDerivatives->GetOffsetTable()[2]) +
+                                                   (movingIndex * this->m_JointPDFDerivatives->GetOffsetTable()[1]);
+              // move joint pdf derivative pointer to the right position
+              for (unsigned int parameter = 0, lastParameter = this->GetNumberOfLocalParameters();
+                   parameter < lastParameter;
+                   ++parameter, derivPtr++)
+              {
+                // Ref: eqn 23 of Thevenaz & Unser paper [3]
+                (*(this->m_DerivativeResult))[parameter] += (*derivPtr) * pRatio;
+              } // end for-loop over parameters
+            }
+            else
+            {
+              // Collect the pRatio per pdf indices.
+              // Will be applied subsequently to local-support derivative
+              const OffsetValueType index = movingIndex + (fixedIndex * this->m_NumberOfHistogramBins);
+              this->m_PRatioArray[index] = pRatio * nFactor;
+            }
+          }
+        } // end if( jointPDFValue > closeToZero && movingImageMarginalPDF > closeToZero )
+      }   // end for-loop over moving index
+    }     // end conditional for fixedmarginalPDF > close to zero
+  }       // end for-loop over fixed index
 
   // Apply the pRatio and sum the per-window derivative
   // contributions, in the local-support case.
