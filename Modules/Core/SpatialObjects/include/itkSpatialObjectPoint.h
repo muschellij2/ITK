@@ -44,6 +44,10 @@ template <unsigned int TPointDimension = 3>
 class ITK_TEMPLATE_EXPORT SpatialObjectPoint
 {
 public:
+  using PointDimensionType = unsigned int;
+
+  static constexpr PointDimensionType PointDimension = TPointDimension;
+
   /** Constructor. */
   SpatialObjectPoint();
 
@@ -200,6 +204,24 @@ public:
     return m_Color.GetAlpha();
   }
 
+  void
+  SetTagScalarValue(const std::string & tag, double value);
+
+  bool
+  GetTagScalarValue(const std::string & tag, double & value) const;
+
+  double
+  GetTagScalarValue(const std::string & tag) const;
+
+  std::map<std::string, double> &
+  GetTagScalarDictionary();
+
+  const std::map<std::string, double> &
+  GetTagScalarDictionary() const;
+
+  void
+  SetTagScalarDictionary(const std::map<std::string, double> & dict);
+
   /** PrintSelf method */
   void
   Print(std::ostream & os) const
@@ -220,6 +242,10 @@ protected:
 
   /** Color of the point */
   ColorType m_Color;
+
+  /** Additional scalar properties of the point */
+  std::map<std::string, double> m_ScalarDictionary;
+
 
   // The SpatialObjectPoint keeps a reference to its owning parent
   // spatial object for its spatial context. A WeakPointer is used to
