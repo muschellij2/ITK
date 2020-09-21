@@ -22,6 +22,7 @@
 #include "itkCompositeTransform.h"
 #include "itkTranslationTransform.h"
 #include "itkMath.h"
+#include "itkTestingMacros.h"
 
 namespace
 {
@@ -115,16 +116,47 @@ itkCompositeTransformTest(int, char *[])
 
   CompositeType::Pointer compositeTransform = CompositeType::New();
 
+  ITK_EXERCISE_BASIC_OBJECT_METHODS(compositeTransform, CompositeTransform, MultiTransform);
+
   /* Test obects */
   using Matrix2Type = itk::Matrix<ScalarType, NDimensions, NDimensions>;
   using Vector2Type = itk::Vector<ScalarType, NDimensions>;
 
+
   /* Test that we have an empty the queue */
-  if (compositeTransform->GetNumberOfTransforms() != 0)
+  ITK_TEST_EXPECT_EQUAL(compositeTransform->GetNumberOfTransforms(), 0u);
+  ITK_TEST_EXPECT_EQUAL(compositeTransform->GetNumberOfParameters(), 0u);
+  ITK_TEST_EXPECT_EQUAL(compositeTransform->GetNumberOfFixedParameters(), 0u);
+  ITK_TEST_EXPECT_EQUAL(compositeTransform->GetParameters().Size(), 0u);
+  ITK_TEST_EXPECT_EQUAL(compositeTransform->GetFixedParameters().Size(), 0u);
+
   {
-    std::cout << "Failed. Expected GetNumberOfTransforms to return 0." << std::endl;
-    return EXIT_FAILURE;
+    CompositeType::InputPointType inputPoint;
+    inputPoint[0] = 1.1;
+    inputPoint[1] = 2.2;
+    CompositeType::InputVectorType inputVector;
+    inputVector[0] = 9.1;
+    inputVector[1] = 8.2;
+
+    if (!testPoint(inputPoint, compositeTransform->TransformPoint(inputPoint)))
+    {
+      std::cout << "Failed transforming point with empty transform." << std::endl;
+      return EXIT_FAILURE;
+    }
+
+    if (!testVectorArray(inputVector, compositeTransform->TransformVector(inputVector)))
+    {
+      std::cout << "Failed transforming vector with empty transform." << std::endl;
+      return EXIT_FAILURE;
+    }
+
+    if (!testVectorArray(inputVector, compositeTransform->TransformVector(inputVector, inputPoint)))
+    {
+      std::cout << "Failed transforming vector with empty transform." << std::endl;
+      return EXIT_FAILURE;
+    }
   }
+
 
   /* Add an affine transform */
   using AffineType = itk::AffineTransform<ScalarType, NDimensions>;

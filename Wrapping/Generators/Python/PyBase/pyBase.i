@@ -1,4 +1,8 @@
-%module pyBasePython
+%module(package="itk") pyBasePython
+
+%pythonbegin %{
+from . import _ITKPyBasePython
+%}
 
 %include <exception.i>
 %include <typemaps.i>
@@ -115,44 +119,7 @@ str = str
                 };
         }
 
-  // some changes in the New() method
-  %rename(__New_orig__) class_name::New;
-  %extend class_name {
-    %pythoncode %{
-      def New(*args, **kargs):
-          """New() -> class_name
-
-          Create a new object of the class class_name and set the input and the parameters if some
-          named or non-named arguments are passed to that method.
-
-          New() tries to assign all the non named parameters to the input of the new objects - the
-          first non named parameter in the first input, etc.
-
-          The named parameters are used by calling the method with the same name prefixed by 'Set'.
-
-          Ex:
-
-            class_name.New( reader, Threshold=10 )
-
-          is (most of the time) equivalent to:
-
-            obj = class_name.New()
-            obj.SetInput( 0, reader.GetOutput() )
-            obj.SetThreshold( 10 )
-          """
-          obj = class_name.__New_orig__()
-          import itkTemplate
-          itkTemplate.New(obj, *args, **kargs)
-          return obj
-      New = staticmethod(New)
-    %}
-  }
-  %pythoncode %{
-    def class_name##_New():
-      return class_name.New()
-  %}
 %enddef
-
 
 %extend itkMetaDataDictionary {
     %ignore Find;
@@ -451,6 +418,22 @@ str = str
                     # Multi-component pixel types, e.g. Vector,
                     # CovariantVector, etc.
                     return itk.template(first_template_arg)[1][0].dtype
+
+            def astype(self, pixel_type):
+                """Cast the image to the provided itk pixel type or equivalent NumPy dtype."""
+                import itk
+                import numpy as np
+                import itkTypes
+
+                # numpy dtype
+                if type(pixel_type) is type:
+                    pixel_type = itkTypes.itkCType.GetCTypeForDType(pixel_type)
+                current_pixel_type = itk.template(self)[1][0]
+                if current_pixel_type is pixel_type:
+                    return self
+                OutputImageType = itk.Image[pixel_type, self.GetImageDimension()]
+                cast = itk.cast_image_filter(self, ttype=(type(self), OutputImageType))
+                return cast
 
             def SetDirection(self, direction):
                 import itkHelpers
